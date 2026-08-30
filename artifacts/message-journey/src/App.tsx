@@ -324,6 +324,43 @@ const journeySequence = [
   { nodeId: 'visitor', edgeId: 'edge-wifi-device-return', direction: 'RETURN' as const },
 ];
 
+type MessageDnaMode = 'packetized' | 'traveling' | 'reconnecting' | 'delivered';
+
+const messageDnaStages = ['Packetizing', 'Routing', 'Reconstructing', 'Delivered'];
+
+function messageDnaBlocks(message: string, packetCount: number) {
+  const seed = Array.from(message).reduce((total, character, index) => total + character.charCodeAt(0) * (index + 1), packetCount * 37);
+  return Array.from({ length: 8 }, (_, index) => ({
+    left: (seed + index * 13 + packetCount) % 2 === 0,
+    right: (seed + index * 17 + message.length) % 2 === 0,
+  }));
+}
+
+function MessageDNA({ message, packetCount, mode, compact = false }: { message: string; packetCount: number; mode: MessageDnaMode; compact?: boolean }) {
+  const blocks = messageDnaBlocks(message, packetCount);
+  const modeCopy = mode === 'packetized' ? 'encoded locally' : mode === 'traveling' ? 'travelling with packets' : mode === 'reconnecting' ? 'reconnecting meaning' : 'message delivered';
+  const accent = mode === 'reconnecting' || mode === 'delivered' ? 'bg-pink-300' : 'bg-cyan-300';
+  return (
+    <div className={`flex items-center gap-2 ${compact ? '' : 'rounded-lg border border-cyan-300/15 bg-cyan-300/[0.035] px-2.5 py-2'}`} data-testid="visual-message-dna">
+      <div className="flex shrink-0 items-center gap-[3px]" aria-label={`Message DNA built from ${packetCount} packets`}>
+        <div className="flex flex-col gap-[3px]">
+          {blocks.map((block, index) => <span key={`left-${index}`} className={`h-1.5 w-1.5 rounded-[1px] ${block.left ? accent : 'bg-slate-700'} ${mode === 'traveling' ? 'shadow-[0_0_8px_hsl(186_92%_58%_/_0.8)]' : ''}`} />)}
+        </div>
+        <div className="flex flex-col gap-[5px]">
+          {blocks.map((block, index) => <motion.span key={`link-${index}`} className={`h-px w-2 ${block.left === block.right ? 'bg-cyan-200/75' : 'bg-violet-300/55'}`} animate={mode === 'reconnecting' ? { opacity: [0.3, 1, 0.3] } : { opacity: 0.75 }} transition={{ duration: 0.9, repeat: mode === 'reconnecting' ? Infinity : 0, delay: index * 0.05 }} />)}
+        </div>
+        <div className="flex flex-col gap-[3px]">
+          {blocks.map((block, index) => <span key={`right-${index}`} className={`h-1.5 w-1.5 rounded-[1px] ${block.right ? accent : 'bg-slate-700'} ${mode === 'traveling' ? 'shadow-[0_0_8px_hsl(186_92%_58%_/_0.8)]' : ''}`} />)}
+        </div>
+      </div>
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 font-mono-ui text-[8px] uppercase tracking-[0.1em] text-cyan-200"><span className={`h-1 w-1 rounded-full ${accent}`} /> Message DNA</div>
+        <div className="mt-0.5 truncate font-mono-ui text-[8px] uppercase tracking-[0.04em] text-slate-600">{packetCount} blocks · {modeCopy}</div>
+      </div>
+    </div>
+  );
+}
+
 function SimulationControls({ simulation, start, pause, continueSimulation, reset }: { simulation: SimulationState; start: () => void; pause: () => void; continueSimulation: () => void; reset: () => void }) {
   const canPause = simulation.phase === 'reading' || simulation.phase === 'breaking' || simulation.phase === 'outbound' || simulation.phase === 'destination' || simulation.phase === 'returning';
   return (
@@ -362,6 +399,8 @@ function NetworkJourney({ message, simulation, start, pause, continueSimulation,
   const completedEdges = new Set(journeySequence.slice(1, routeIndex + 1).map((step) => step.edgeId));
   const completedNodeIds = new Set(journeySequence.slice(0, routeIndex + 1).map((step) => step.nodeId));
   const directionLabel = effectivePhase === 'returning' || effectivePhase === 'complete' ? 'RETURN' : effectivePhase === 'outbound' || effectivePhase === 'destination' ? 'OUTBOUND' : 'PREPARE';
+  const dnaMode: MessageDnaMode = simulation.phase === 'complete' ? 'delivered' : effectivePhase === 'destination' ? 'reconnecting' : effectivePhase === 'outbound' || effectivePhase === 'returning' ? 'traveling' : 'packetized';
+  const activeDnaStage = effectivePhase === 'complete' ? 3 : effectivePhase === 'destination' ? 2 : effectivePhase === 'outbound' || effectivePhase === 'returning' ? 1 : 0;
   const phaseCopy = simulation.phase === 'reading' ? 'Holding the original thought intact'
     : simulation.phase === 'breaking' ? 'Breaking one thought into small packets'
       : simulation.phase === 'outbound' ? 'Packets taking the outbound route'
@@ -377,6 +416,14 @@ function NetworkJourney({ message, simulation, start, pause, continueSimulation,
         <div className="rounded-full border border-slate-700 bg-slate-900/50 px-3 py-2 font-mono-ui text-[10px] text-slate-500" data-testid="text-simulation-progress">{Math.round(routeProgress).toString().padStart(3, '0')}%</div>
       </div>
       <div className="relative mt-4 flex items-center gap-2 rounded-lg border border-pink-300/15 bg-pink-300/[0.035] px-3 py-2.5 font-mono-ui text-[9px] leading-4 tracking-[0.04em] text-pink-100/70" data-testid="text-conceptual-disclaimer"><LockKeyhole size={12} className="shrink-0 text-pink-200" /> This is a local conceptual simulation — never the visitor&apos;s real internet route.</div>
+      <div className="relative mt-4 grid grid-cols-2 gap-1.5 rounded-lg border border-slate-700/60 bg-slate-900/45 p-1.5 sm:grid-cols-4" aria-label="Message DNA stages" data-testid="message-dna-stages">
+        {messageDnaStages.map((stage, index) => (
+          <div key={stage} className={`rounded-md px-2 py-2 font-mono-ui text-[8px] uppercase tracking-[0.08em] transition-colors sm:px-2.5 ${index === activeDnaStage ? 'bg-cyan-300/10 text-cyan-200' : index < activeDnaStage ? 'text-cyan-300/55' : 'text-slate-600'}`} data-testid={`message-dna-stage-${stage.toLowerCase()}`}>
+            <span className={`mr-1.5 inline-block h-1 w-1 rounded-full align-middle ${index === activeDnaStage ? (index === 2 ? 'bg-pink-300' : 'bg-cyan-300') : index < activeDnaStage ? 'bg-cyan-300/60' : 'bg-slate-700'}`} />
+            {stage}
+          </div>
+        ))}
+      </div>
       <div className="relative mt-7 grid items-center gap-3 border-b border-slate-700/60 pb-6 sm:grid-cols-[1fr_auto_1fr]" data-testid="visual-packet-transformation">
         <div className={`rounded-xl border p-3 transition-colors sm:p-4 ${simulation.phase === 'reading' ? 'border-cyan-300/70 bg-cyan-300/[0.1]' : 'border-slate-700 bg-slate-900/75'}`} data-testid="visual-readable-message">
           <div className="mb-2 flex items-center gap-2 font-mono-ui text-[9px] uppercase tracking-[0.12em] text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-pink-300" /> readable message</div>
@@ -386,6 +433,7 @@ function NetworkJourney({ message, simulation, start, pause, continueSimulation,
         <div className="flex min-h-12 flex-wrap items-center gap-1.5 rounded-xl border border-dashed border-cyan-300/25 bg-cyan-300/[0.035] p-3 sm:p-4" data-testid="visual-packet-bundle">
           {packetLabels.map((label, index) => <motion.span key={`${label}-${index}`} initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: simulation.phase === 'reading' ? 0.35 : 1, scale: 1 }} transition={{ delay: index * 0.07 }} className="flex items-center gap-1 rounded-full border border-cyan-300/40 bg-cyan-300/10 px-2 py-1 font-mono-ui text-[8px] text-cyan-100" data-testid={`visual-packet-chip-${index + 1}`}><span className="h-1 w-1 rounded-full bg-cyan-300" />{label.slice(0, 10)}</motion.span>)}
           <span className="ml-auto font-mono-ui text-[8px] uppercase tracking-[0.08em] text-slate-600">packet bundle</span>
+          <MessageDNA message={message} packetCount={packetLabels.length} mode={dnaMode} />
         </div>
       </div>
       <div className="relative mt-5 h-[295px] sm:h-[350px]" data-testid="visual-network-graph">
@@ -400,6 +448,18 @@ function NetworkJourney({ message, simulation, start, pause, continueSimulation,
             return <line key={edge.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke={isActive ? (directionLabel === 'RETURN' ? 'hsl(320 78% 65%)' : 'hsl(186 92% 58%)') : isComplete ? 'hsl(186 92% 58% / .58)' : edge.alternate ? 'hsl(272 70% 72% / .32)' : 'hsl(217 22% 38% / .55)'} strokeWidth={isActive ? 0.7 : isComplete ? 0.42 : 0.24} strokeDasharray={edge.alternate ? '1.4 1.2' : undefined} data-testid={`network-edge-${edge.id}`} />;
           })}
           {fromNode && toNode && activeEdge && (effectivePhase === 'outbound' || effectivePhase === 'returning') && packetLabels.slice(0, 3).map((label, index) => <motion.g key={`moving-${label}-${index}`} initial={{ x: fromNode.x, y: fromNode.y }} animate={{ x: fromNode.x + (toNode.x - fromNode.x) * edgeProgress, y: fromNode.y + (toNode.y - fromNode.y) * edgeProgress }} transition={{ duration: 0.22, ease: 'linear', delay: index * 0.08 }} data-testid={`visual-moving-packet-${index + 1}`}><rect x="-1.15" y="-0.7" width="2.3" height="1.4" rx=".25" fill={directionLabel === 'RETURN' ? 'hsl(320 78% 65%)' : 'hsl(186 92% 58%)'} /><circle r=".35" fill="hsl(210 33% 96%)" /></motion.g>)}
+          {fromNode && toNode && activeEdge && (effectivePhase === 'outbound' || effectivePhase === 'returning') && (
+            <motion.g initial={{ x: fromNode.x, y: fromNode.y }} animate={{ x: fromNode.x + (toNode.x - fromNode.x) * edgeProgress, y: fromNode.y + (toNode.y - fromNode.y) * edgeProgress }} transition={{ duration: 0.22, ease: 'linear' }} data-testid="visual-moving-message-dna">
+              <circle r="4" fill={directionLabel === 'RETURN' ? 'hsl(320 78% 65% / .13)' : 'hsl(186 92% 58% / .13)'} />
+              {messageDnaBlocks(message, packetLabels.length).slice(0, 4).map((block, index) => (
+                <g key={`dna-block-${index}`} transform={`translate(-1.8 ${-2.4 + index * 1.6})`}>
+                  <rect x="-1.8" y="0" width="1.1" height=".9" rx=".15" fill={block.left ? (directionLabel === 'RETURN' ? 'hsl(320 78% 65%)' : 'hsl(186 92% 58%)') : 'hsl(217 22% 48% / .8)'} />
+                  <rect x="0.7" y="0" width="1.1" height=".9" rx=".15" fill={block.right ? (directionLabel === 'RETURN' ? 'hsl(320 78% 65%)' : 'hsl(186 92% 58%)') : 'hsl(217 22% 48% / .8)'} />
+                  <line x1="-0.7" y1=".45" x2=".7" y2=".45" stroke="hsl(210 33% 96% / .7)" strokeWidth=".2" />
+                </g>
+              ))}
+            </motion.g>
+          )}
         </svg>
         {networkNodes.map((node) => {
           const isActive = activeStep?.nodeId === node.id && simulation.phase !== 'complete';
