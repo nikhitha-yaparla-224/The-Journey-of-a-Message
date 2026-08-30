@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowDown,
@@ -18,7 +18,6 @@ import {
   Sparkles,
   Terminal,
   X,
-  Zap,
 } from 'lucide-react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -37,12 +36,33 @@ type Stage = {
   color: 'cyan' | 'pink' | 'violet';
 };
 
+type SimulationPhase = 'idle' | 'reading' | 'breaking' | 'traveling' | 'paused' | 'arrived';
+
+type SimulationState = {
+  phase: SimulationPhase;
+  progress: number;
+  pausedFrom: Exclude<SimulationPhase, 'paused'>;
+};
+
 const stages: Stage[] = [
   { index: '01', name: 'Your device', detail: 'The thought becomes a small, structured bundle of data.', icon: Terminal, color: 'cyan' },
   { index: '02', name: 'Local network', detail: 'Your message asks the nearby network for a way out.', icon: Radio, color: 'pink' },
   { index: '03', name: 'A wider route', detail: 'Independent routers pass the bundle toward its destination.', icon: Network, color: 'violet' },
   { index: '04', name: 'The handoff', detail: 'The receiving service reassembles the pieces into meaning.', icon: Sparkles, color: 'cyan' },
 ];
+
+const initialSimulation: SimulationState = { phase: 'idle', progress: 0, pausedFrom: 'idle' };
+
+function phaseProgress(simulation: SimulationState) {
+  if (simulation.phase === 'idle') return 0;
+  if (simulation.phase === 'reading') return 16;
+  if (simulation.phase === 'breaking') return 42;
+  if (simulation.phase === 'traveling') return 42 + simulation.progress * 58;
+  if (simulation.phase === 'arrived') return 100;
+  if (simulation.pausedFrom === 'reading') return 16;
+  if (simulation.pausedFrom === 'breaking') return 42;
+  return 42 + simulation.progress * 58;
+}
 
 const navItems = [
   { id: 'home', label: 'Home' },
@@ -181,7 +201,10 @@ function MobileMenu({ open, close }: { open: boolean; close: () => void }) {
   );
 }
 
-function Hero({ message, setMessage, send, isSending, sent }: { message: string; setMessage: (value: string) => void; send: () => void; isSending: boolean; sent: boolean }) {
+function Hero({ message, setMessage, start, simulation, composerHint }: { message: string; setMessage: (value: string) => void; start: () => void; simulation: SimulationState; composerHint: string }) {
+  const active = simulation.phase === 'reading' || simulation.phase === 'breaking' || simulation.phase === 'traveling';
+  const canSubmit = simulation.phase === 'idle' || simulation.phase === 'arrived';
+  const buttonLabel = simulation.phase === 'reading' ? 'Reading' : simulation.phase === 'breaking' ? 'Breaking apart' : simulation.phase === 'traveling' ? 'In motion' : simulation.phase === 'paused' ? 'Paused' : simulation.phase === 'arrived' ? 'Send again' : 'Send message';
   return (
     <section id="home" className="relative flex min-h-[760px] items-center overflow-hidden pt-24 sm:min-h-[850px]">
       <NetworkBackdrop />
@@ -206,7 +229,7 @@ function Hero({ message, setMessage, send, isSending, sent }: { message: string;
         <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.42, duration: 0.8 }} className="relative lg:justify-self-end">
           <div className="absolute -inset-5 rounded-[2rem] border border-cyan-300/[0.08] sm:-inset-8" />
           <div className="absolute -inset-14 rounded-[3rem] border border-slate-700/20" />
-          <form onSubmit={(event) => { event.preventDefault(); send(); }} className="relative w-full max-w-[500px] overflow-hidden rounded-2xl border border-slate-600/70 bg-[#0d1422]/90 shadow-2xl shadow-cyan-950/20 backdrop-blur-xl">
+          <form onSubmit={(event) => { event.preventDefault(); if (canSubmit) start(); }} className="relative w-full max-w-[500px] overflow-hidden rounded-2xl border border-slate-600/70 bg-[#0d1422]/90 shadow-2xl shadow-cyan-950/20 backdrop-blur-xl">
             <div className="flex items-center justify-between border-b border-slate-700/60 px-5 py-4">
               <div className="flex items-center gap-2.5">
                 <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_12px_hsl(186_92%_58%)]" />
@@ -219,20 +242,27 @@ function Hero({ message, setMessage, send, isSending, sent }: { message: string;
               <textarea id="message-input" value={message} onChange={(event) => setMessage(event.target.value)} rows={5} maxLength={180} placeholder="Type something worth sending..." className="w-full resize-none bg-transparent font-display text-xl leading-8 text-slate-100 outline-none placeholder:text-slate-700" data-testid="input-message" />
               <div className="mt-3 flex items-center justify-between border-t border-slate-700/50 pt-4">
                 <span className="font-mono-ui text-[10px] text-slate-600">{message.length.toString().padStart(3, '0')} / 180</span>
-                <button type="submit" disabled={isSending} className="group flex items-center gap-3 rounded-full bg-cyan-300 px-5 py-3 font-mono-ui text-[11px] font-medium uppercase tracking-[0.12em] text-[#081019] transition-all hover:bg-cyan-200 hover:shadow-[0_0_30px_hsl(186_92%_58%_/_0.28)] disabled:cursor-wait disabled:opacity-70" data-testid="button-send-message">
-                  {isSending ? 'Launching' : sent ? 'Send again' : 'Send message'}
-                  <motion.span animate={isSending ? { x: [0, 5, 0] } : { x: 0 }} transition={{ repeat: isSending ? Infinity : 0, duration: 0.8 }}><Send size={14} /></motion.span>
+                <button type="submit" disabled={!canSubmit} className="group flex items-center gap-3 rounded-full bg-cyan-300 px-5 py-3 font-mono-ui text-[11px] font-medium uppercase tracking-[0.12em] text-[#081019] transition-all hover:bg-cyan-200 hover:shadow-[0_0_30px_hsl(186_92%_58%_/_0.28)] disabled:cursor-wait disabled:opacity-70" data-testid="button-send-message">
+                  {buttonLabel}
+                  <motion.span animate={active ? { x: [0, 5, 0] } : { x: 0 }} transition={{ repeat: active ? Infinity : 0, duration: 0.8 }}><Send size={14} /></motion.span>
                 </button>
               </div>
             </div>
             <AnimatePresence>
-              {sent && !isSending && (
+              {simulation.phase === 'arrived' && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} className="border-t border-cyan-300/20 bg-cyan-300/[0.06] px-5 py-3 font-mono-ui text-[10px] tracking-[0.06em] text-cyan-200">
-                  <Check size={13} className="mr-2 inline-block" /> SIGNAL CAPTURED · FOLLOW IT BELOW
+                  <Check size={13} className="mr-2 inline-block" /> FIRST HANDOFF COMPLETE · FOLLOW IT BELOW
                 </motion.div>
               )}
             </AnimatePresence>
           </form>
+          <AnimatePresence>
+            {composerHint && (
+              <motion.p role="alert" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="mt-3 flex items-center gap-2 px-1 font-mono-ui text-[10px] tracking-[0.04em] text-pink-200" data-testid="text-composer-instruction">
+                <Info size={13} /> {composerHint}
+              </motion.p>
+            )}
+          </AnimatePresence>
           <div className="mt-5 flex items-center gap-2 px-1 font-mono-ui text-[10px] text-slate-600"><LockKeyhole size={12} /> Nothing leaves this page. This is a safe, local simulation.</div>
         </motion.div>
       </div>
@@ -240,8 +270,65 @@ function Hero({ message, setMessage, send, isSending, sent }: { message: string;
   );
 }
 
-function Journey({ sent, currentStage, replay }: { sent: boolean; currentStage: number; replay: () => void }) {
-  const progress = sent ? ((currentStage + 1) / stages.length) * 100 : 0;
+function SimulationControls({ simulation, start, pause, continueSimulation, reset }: { simulation: SimulationState; start: () => void; pause: () => void; continueSimulation: () => void; reset: () => void }) {
+  const canPause = simulation.phase === 'reading' || simulation.phase === 'breaking' || simulation.phase === 'traveling';
+  return (
+    <div className="mt-6 flex flex-wrap items-center gap-2" data-testid="simulation-controls">
+      {simulation.phase === 'idle' && <button onClick={start} className="rounded-full bg-cyan-300 px-4 py-2.5 font-mono-ui text-[10px] uppercase tracking-[0.12em] text-[#081019] transition-colors hover:bg-cyan-200" data-testid="button-simulation-start"><Send size={12} className="mr-2 inline-block" /> Start</button>}
+      {canPause && <button onClick={pause} className="rounded-full border border-slate-600 px-4 py-2.5 font-mono-ui text-[10px] uppercase tracking-[0.12em] text-slate-300 transition-colors hover:border-pink-300/60 hover:text-pink-200" data-testid="button-simulation-pause">Pause</button>}
+      {simulation.phase === 'paused' && <button onClick={continueSimulation} className="rounded-full bg-cyan-300 px-4 py-2.5 font-mono-ui text-[10px] uppercase tracking-[0.12em] text-[#081019] transition-colors hover:bg-cyan-200" data-testid="button-simulation-continue"><ArrowRight size={12} className="mr-2 inline-block" /> Continue</button>}
+      {simulation.phase !== 'idle' && <button onClick={reset} className="rounded-full border border-slate-700 px-4 py-2.5 font-mono-ui text-[10px] uppercase tracking-[0.12em] text-slate-500 transition-colors hover:border-slate-500 hover:text-slate-200" data-testid="button-simulation-reset">Reset</button>}
+    </div>
+  );
+}
+
+function PacketRoute({ message, simulation, start, pause, continueSimulation, reset }: { message: string; simulation: SimulationState; start: () => void; pause: () => void; continueSimulation: () => void; reset: () => void }) {
+  const packetLabels = useMemo(() => {
+    const clean = message.trim();
+    if (!clean) return [];
+    const count = Math.min(6, Math.max(3, Math.ceil(clean.length / 16)));
+    const size = Math.ceil(clean.length / count);
+    return Array.from({ length: count }, (_, index) => clean.slice(index * size, (index + 1) * size) || `chunk ${index + 1}`);
+  }, [message]);
+  const isPaused = simulation.phase === 'paused';
+  const showPackets = simulation.phase === 'breaking' || simulation.phase === 'traveling' || simulation.phase === 'arrived' || isPaused;
+  const packetProgress = simulation.phase === 'arrived' ? 1 : simulation.progress;
+  const packetOffsets = [[0, -24], [7, 18], [-6, 42], [11, -43], [-11, 0], [4, 61]];
+  const routeProgress = phaseProgress(simulation);
+  return (
+    <div className="relative min-h-[410px] overflow-hidden rounded-2xl border border-slate-700/70 bg-[#0b1220] p-5 sm:p-8" data-testid="panel-packet-route">
+      <div className="network-grid absolute inset-0 opacity-40" />
+      <div className="relative flex items-start justify-between gap-4">
+        <div><div className="font-mono-ui text-[10px] uppercase tracking-[0.15em] text-cyan-300">Live route / local only</div><div className="mt-2 font-display text-2xl text-slate-100">From thought to packets</div></div>
+        <div className="rounded-full border border-slate-700 bg-slate-900/50 px-3 py-2 font-mono-ui text-[10px] text-slate-500" data-testid="text-simulation-progress">{Math.round(routeProgress).toString().padStart(3, '0')}%</div>
+      </div>
+      <div className="relative mt-9 h-[180px] sm:h-[205px]" data-testid="visual-packet-transformation">
+        <div className={`absolute left-0 top-[54px] z-10 w-[43%] min-w-[112px] rounded-xl border p-3 transition-colors sm:top-[60px] sm:min-w-[168px] sm:p-4 ${simulation.phase === 'reading' ? 'border-cyan-300/70 bg-cyan-300/[0.1]' : 'border-slate-700 bg-slate-900/75'}`} data-testid="visual-readable-message">
+          <div className="mb-2 flex items-center gap-2 font-mono-ui text-[9px] uppercase tracking-[0.12em] text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-pink-300" /> readable message</div>
+          <p className={`line-clamp-3 font-display text-xs leading-5 transition-opacity sm:text-sm ${simulation.phase === 'traveling' || simulation.phase === 'arrived' ? 'text-slate-500 opacity-60' : 'text-slate-200'}`}>{message || 'Your message will appear here.'}</p>
+        </div>
+        <div className="absolute left-[45%] right-[19%] top-[82px] h-px bg-gradient-to-r from-slate-700 via-cyan-300/35 to-cyan-300/60 sm:left-[44%] sm:right-[20%]" />
+        <div className="absolute right-0 top-[39px] z-10 flex w-[20%] min-w-[68px] flex-col items-center gap-2 sm:top-[45px] sm:min-w-[92px]" data-testid="visual-first-network-stage">
+          <div className={`flex h-14 w-14 items-center justify-center rounded-full border transition-all sm:h-[68px] sm:w-[68px] ${simulation.phase === 'arrived' ? 'border-cyan-200 bg-cyan-300 text-[#081019] shadow-[0_0_30px_hsl(186_92%_58%_/_0.26)]' : 'border-slate-600 bg-slate-900 text-slate-500'}`}><Radio size={19} /></div>
+          <span className="text-center font-mono-ui text-[9px] uppercase leading-4 tracking-[0.08em] text-slate-500">local<br />network</span>
+        </div>
+        {showPackets && packetLabels.map((label, index) => {
+          const [x, y] = packetOffsets[index % packetOffsets.length];
+          return <motion.div key={`${label}-${index}`} className="absolute left-[41%] top-[75px] z-20 flex items-center gap-1.5 rounded-full border border-cyan-200/60 bg-[#0d1d2c] px-2 py-1 font-mono-ui text-[8px] text-cyan-100 shadow-[0_0_16px_hsl(186_92%_58%_/_0.2)] sm:px-2.5 sm:text-[9px]" initial={{ opacity: 0, scale: 0.4, x: 0, y: 0 }} animate={{ opacity: 1, scale: simulation.phase === 'breaking' ? [0.8, 1.06, 0.96] : 1, x: packetProgress * (index % 2 === 0 ? 190 + x : 165 + x), y: packetProgress * y }} transition={{ delay: index * 0.08, duration: simulation.phase === 'breaking' ? 0.5 : 0.8 }} data-testid={`visual-packet-${index + 1}`}><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300" />{label.slice(0, 14)}</motion.div>;
+        })}
+      </div>
+      <div className="relative border-t border-slate-700/60 pt-4">
+        <div className="mb-3 flex items-center justify-between font-mono-ui text-[9px] uppercase tracking-[0.12em] text-slate-600"><span data-testid="text-simulation-phase">{simulation.phase === 'idle' ? 'Ready when you are' : simulation.phase === 'reading' ? 'Holding the thought intact' : simulation.phase === 'breaking' ? 'Breaking one thought into small packets' : simulation.phase === 'traveling' ? 'Packets moving toward the first handoff' : simulation.phase === 'paused' ? 'Paused exactly here' : 'Packets reached the first handoff'}</span><span>{packetLabels.length || 0} packets</span></div>
+        <div className="h-1 overflow-hidden rounded-full bg-slate-800" aria-label={`Simulation progress ${Math.round(routeProgress)} percent`}><motion.div className="h-full origin-left rounded-full bg-gradient-to-r from-pink-300 via-cyan-300 to-cyan-200" animate={{ scaleX: routeProgress / 100 }} transition={{ duration: 0.35 }} /></div>
+        <SimulationControls simulation={simulation} start={start} pause={pause} continueSimulation={continueSimulation} reset={reset} />
+      </div>
+    </div>
+  );
+}
+
+function Journey({ message, simulation, start, pause, continueSimulation, reset }: { message: string; simulation: SimulationState; start: () => void; pause: () => void; continueSimulation: () => void; reset: () => void }) {
+  const currentStage = simulation.phase === 'arrived' ? 1 : 0;
+  const sent = simulation.phase !== 'idle';
   return (
     <SectionReveal id="journey" className="relative mx-auto max-w-7xl scroll-mt-20 px-5 py-28 sm:px-8 sm:py-36">
       <div className="mb-16 flex flex-col justify-between gap-7 lg:flex-row lg:items-end">
@@ -260,7 +347,7 @@ function Journey({ sent, currentStage, replay }: { sent: boolean; currentStage: 
               const complete = sent && index < currentStage;
               const Icon = stage.icon;
               return (
-                <motion.button key={stage.name} onClick={replay} className={`group relative flex w-full items-start gap-5 rounded-xl p-3 text-left transition-all ${active ? 'bg-slate-800/75' : 'hover:bg-slate-800/35'}`} data-testid={`button-stage-${index + 1}`}>
+                <motion.div key={stage.name} className={`group relative flex w-full items-start gap-5 rounded-xl p-3 text-left transition-all ${active ? 'bg-slate-800/75' : 'hover:bg-slate-800/35'}`} data-testid={`item-stage-${index + 1}`}>
                   <span className={`relative z-10 flex h-4 w-4 shrink-0 translate-y-2 items-center justify-center rounded-full border ${active ? 'border-cyan-200 bg-cyan-300 shadow-[0_0_18px_hsl(186_92%_58%_/_0.7)]' : complete ? 'border-pink-300 bg-pink-300' : 'border-slate-600 bg-[#080c16]'} transition-colors`}>
                     {complete && <Check size={10} className="text-[#081019]" />}
                   </span>
@@ -272,48 +359,27 @@ function Journey({ sent, currentStage, replay }: { sent: boolean; currentStage: 
                     <span className="mt-1 block max-w-sm text-xs leading-5 text-slate-600 group-hover:text-slate-500">{stage.detail}</span>
                   </span>
                   <Icon size={17} className={active ? 'mt-1 text-cyan-300' : 'mt-1 text-slate-700'} />
-                </motion.button>
+                </motion.div>
               );
             })}
           </div>
         </div>
-        <div className="relative min-h-[390px] overflow-hidden rounded-2xl border border-slate-700/70 bg-[#0b1220] p-5 sm:p-8">
-          <div className="network-grid absolute inset-0 opacity-40" />
+        <div className="relative">
           <AnimatePresence mode="wait">
-            {!sent ? (
-              <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="relative flex min-h-[330px] flex-col items-center justify-center text-center">
+            {simulation.phase === 'idle' ? (
+              <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="relative flex min-h-[390px] flex-col items-center justify-center overflow-hidden rounded-2xl border border-slate-700/70 bg-[#0b1220] p-5 text-center sm:p-8">
+                <div className="network-grid absolute inset-0 opacity-40" />
                 <div className="relative mb-8 flex h-28 w-28 items-center justify-center rounded-full border border-slate-600/70">
                   <div className="absolute inset-3 rounded-full border border-dashed border-slate-600" />
                   <Orbit size={28} className="text-slate-500" />
                   <span className="absolute -right-2 top-5 h-2 w-2 rounded-full bg-pink-300" />
                   <span className="absolute -bottom-1 left-7 h-1.5 w-1.5 rounded-full bg-cyan-300" />
                 </div>
-                <p className="font-display text-xl text-slate-300">The route is waiting.</p>
-                <p className="mt-2 max-w-xs text-sm leading-6 text-slate-600">Send a message above to wake up the network and watch the handoffs happen.</p>
-                <button onClick={() => scrollToSection('home')} className="mt-6 flex items-center gap-2 font-mono-ui text-[10px] uppercase tracking-[0.15em] text-cyan-300 hover:text-cyan-200" data-testid="button-return-to-compose">Return to compose <ArrowRight size={13} /></button>
+                <p className="relative font-display text-xl text-slate-300">The route is waiting.</p>
+                <p className="relative mt-2 max-w-xs text-sm leading-6 text-slate-600">Send a message above to wake up the network and watch the handoffs happen.</p>
+                <button onClick={() => scrollToSection('home')} className="relative mt-6 flex items-center gap-2 font-mono-ui text-[10px] uppercase tracking-[0.15em] text-cyan-300 hover:text-cyan-200" data-testid="button-return-to-compose">Return to compose <ArrowRight size={13} /></button>
               </motion.div>
-            ) : (
-              <motion.div key="active" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="relative">
-                <div className="mb-12 flex items-center justify-between">
-                  <div><div className="font-mono-ui text-[10px] uppercase tracking-[0.15em] text-cyan-300">Live route / local only</div><div className="mt-2 font-display text-2xl text-slate-100">Signal in motion</div></div>
-                  <button onClick={replay} className="rounded-full border border-slate-600 px-3 py-2 font-mono-ui text-[10px] text-slate-400 hover:border-cyan-300/50 hover:text-cyan-200" data-testid="button-replay-journey">Replay</button>
-                </div>
-                <div className="relative flex items-center justify-between px-2 sm:px-8">
-                  <div className="absolute left-4 right-4 top-1/2 h-px bg-slate-700 sm:left-10 sm:right-10" />
-                  <motion.div className="absolute left-4 top-1/2 h-px origin-left bg-cyan-300 sm:left-10" animate={{ width: `calc(${progress}% - ${progress > 95 ? 20 : 0}px)` }} transition={{ duration: 0.6 }} />
-                  {stages.map((stage, index) => { const StageIcon = stage.icon; return <div key={stage.name} className="relative flex flex-col items-center gap-4">
-                    <motion.div animate={index === currentStage ? { scale: [1, 1.12, 1] } : { scale: 1 }} transition={{ duration: 1.6, repeat: index === currentStage ? Infinity : 0 }} className={`flex h-11 w-11 items-center justify-center rounded-full border ${index <= currentStage ? 'border-cyan-200 bg-cyan-300 text-[#081019]' : 'border-slate-600 bg-[#0b1220] text-slate-600'}`}><StageIcon size={16} /></motion.div>
-                    <span className={`hidden font-mono-ui text-[9px] uppercase tracking-[0.1em] sm:block ${index === currentStage ? 'text-cyan-200' : 'text-slate-600'}`}>{stage.name}</span>
-                  </div>; })}
-                </div>
-                <div className="mt-16 rounded-xl border border-slate-700/70 bg-slate-900/60 p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="mt-1 rounded-lg bg-cyan-300/10 p-2 text-cyan-300"><Zap size={16} /></div>
-                    <div><div className="font-mono-ui text-[10px] uppercase tracking-[0.14em] text-cyan-300">Now passing through · {stages[currentStage].index}</div><div className="mt-2 font-display text-lg text-slate-200">{stages[currentStage].name}</div><p className="mt-1 text-sm leading-6 text-slate-500">{stages[currentStage].detail}</p></div>
-                  </div>
-                </div>
-              </motion.div>
-            )}
+            ) : <motion.div key="active" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><PacketRoute message={message} simulation={simulation} start={start} pause={pause} continueSimulation={continueSimulation} reset={reset} /></motion.div>}
           </AnimatePresence>
         </div>
       </div>
@@ -402,42 +468,64 @@ function About() {
 
 function Home() {
   const [message, setMessage] = useState('');
-  const [isSending, setIsSending] = useState(false);
-  const [sent, setSent] = useState(false);
-  const [currentStage, setCurrentStage] = useState(0);
+  const [simulation, setSimulation] = useState<SimulationState>(initialSimulation);
+  const [composerHint, setComposerHint] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeId, setActiveId] = useState('home');
-  const timerRef = useRef<number | undefined>(undefined);
 
-  useEffect(() => () => { if (timerRef.current) window.clearTimeout(timerRef.current); }, []);
   useEffect(() => {
-    if (!sent || isSending) return;
-    const interval = window.setInterval(() => setCurrentStage((value) => value < stages.length - 1 ? value + 1 : value), 1900);
-    return () => window.clearInterval(interval);
-  }, [sent, isSending]);
+    if (simulation.phase === 'reading') {
+      const timeout = window.setTimeout(() => setSimulation((current) => current.phase === 'reading' ? { ...current, phase: 'breaking' } : current), 900);
+      return () => window.clearTimeout(timeout);
+    }
+    if (simulation.phase === 'breaking') {
+      const timeout = window.setTimeout(() => setSimulation((current) => current.phase === 'breaking' ? { ...current, phase: 'traveling', progress: 0 } : current), 1050);
+      return () => window.clearTimeout(timeout);
+    }
+    if (simulation.phase === 'traveling') {
+      const interval = window.setInterval(() => setSimulation((current) => {
+        if (current.phase !== 'traveling') return current;
+        const nextProgress = Math.min(1, current.progress + 0.025);
+        return nextProgress >= 1 ? { ...current, phase: 'arrived', progress: 1, pausedFrom: 'arrived' } : { ...current, progress: nextProgress };
+      }), 70);
+      return () => window.clearInterval(interval);
+    }
+    return undefined;
+  }, [simulation.phase]);
   useEffect(() => {
     const observer = new IntersectionObserver((entries) => entries.forEach((entry) => { if (entry.isIntersecting) setActiveId(entry.target.id); }), { rootMargin: '-35% 0px -55% 0px' });
     navItems.forEach(({ id }) => { const element = document.getElementById(id); if (element) observer.observe(element); });
     return () => observer.disconnect();
   }, []);
 
-  const send = () => {
-    if (isSending) return;
-    if (!message.trim()) setMessage('Meet me where the signal bends.');
-    setIsSending(true);
-    setSent(false);
-    setCurrentStage(0);
-    timerRef.current = window.setTimeout(() => { setIsSending(false); setSent(true); scrollToSection('journey'); }, 1200);
+  const start = () => {
+    if (!message.trim()) {
+      setComposerHint('Write a few words first — the route needs a message to carry.');
+      scrollToSection('home');
+      return;
+    }
+    setComposerHint('');
+    setSimulation({ phase: 'reading', progress: 0, pausedFrom: 'reading' });
+    scrollToSection('journey');
   };
-  const replay = () => { setCurrentStage(0); setSent(true); };
+  const pause = () => setSimulation((current) => {
+    if (current.phase !== 'reading' && current.phase !== 'breaking' && current.phase !== 'traveling') return current;
+    return { ...current, phase: 'paused', pausedFrom: current.phase };
+  });
+  const continueSimulation = () => setSimulation((current) => current.phase === 'paused' ? { ...current, phase: current.pausedFrom } : current);
+  const reset = () => {
+    setSimulation(initialSimulation);
+    setMessage('');
+    setComposerHint('');
+  };
 
   return (
     <div className="noise min-h-[100dvh] overflow-x-hidden">
       <Header activeId={activeId} onMenu={() => setMenuOpen(true)} />
       <MobileMenu open={menuOpen} close={() => setMenuOpen(false)} />
       <main>
-        <Hero message={message} setMessage={setMessage} send={send} isSending={isSending} sent={sent} />
-        <Journey sent={sent} currentStage={currentStage} replay={replay} />
+        <Hero message={message} setMessage={(value) => { setMessage(value); if (composerHint) setComposerHint(''); }} start={start} simulation={simulation} composerHint={composerHint} />
+        <Journey message={message} simulation={simulation} start={start} pause={pause} continueSimulation={continueSimulation} reset={reset} />
         <PacketView message={message} />
         <Learn />
         <About />
