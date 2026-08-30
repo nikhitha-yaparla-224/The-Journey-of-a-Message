@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "The Journey of a Message"
+description = "An interactive visual story that reveals the invisible journey of a digital message after Send is pressed, using a safe local simulation for a prompt engineering competition."
+version = "1.0.0"
+id = "artifacts/message-journey"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22908
+
+[services.development]
+run = "pnpm --filter @workspace/message-journey run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/message-journey", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/message-journey/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22908"
+BASE_PATH = "/"
