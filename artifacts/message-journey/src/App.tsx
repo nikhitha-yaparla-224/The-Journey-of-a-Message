@@ -36,7 +36,7 @@ type Stage = {
   color: 'cyan' | 'pink' | 'violet';
 };
 
-type SimulationPhase = 'idle' | 'reading' | 'breaking' | 'traveling' | 'paused' | 'arrived';
+type SimulationPhase = 'idle' | 'reading' | 'breaking' | 'outbound' | 'destination' | 'returning' | 'paused' | 'complete';
 
 type SimulationState = {
   phase: SimulationPhase;
@@ -55,13 +55,17 @@ const initialSimulation: SimulationState = { phase: 'idle', progress: 0, pausedF
 
 function phaseProgress(simulation: SimulationState) {
   if (simulation.phase === 'idle') return 0;
-  if (simulation.phase === 'reading') return 16;
-  if (simulation.phase === 'breaking') return 42;
-  if (simulation.phase === 'traveling') return 42 + simulation.progress * 58;
-  if (simulation.phase === 'arrived') return 100;
+  if (simulation.phase === 'reading') return 12;
+  if (simulation.phase === 'breaking') return 24;
+  if (simulation.phase === 'outbound') return 24 + simulation.progress * 34;
+  if (simulation.phase === 'destination') return 58;
+  if (simulation.phase === 'returning') return 58 + simulation.progress * 42;
+  if (simulation.phase === 'complete') return 100;
   if (simulation.pausedFrom === 'reading') return 16;
-  if (simulation.pausedFrom === 'breaking') return 42;
-  return 42 + simulation.progress * 58;
+  if (simulation.pausedFrom === 'breaking') return 24;
+  if (simulation.pausedFrom === 'outbound') return 24 + simulation.progress * 34;
+  if (simulation.pausedFrom === 'destination') return 58;
+  return 58 + simulation.progress * 42;
 }
 
 const navItems = [
@@ -202,9 +206,9 @@ function MobileMenu({ open, close }: { open: boolean; close: () => void }) {
 }
 
 function Hero({ message, setMessage, start, simulation, composerHint }: { message: string; setMessage: (value: string) => void; start: () => void; simulation: SimulationState; composerHint: string }) {
-  const active = simulation.phase === 'reading' || simulation.phase === 'breaking' || simulation.phase === 'traveling';
-  const canSubmit = simulation.phase === 'idle' || simulation.phase === 'arrived';
-  const buttonLabel = simulation.phase === 'reading' ? 'Reading' : simulation.phase === 'breaking' ? 'Breaking apart' : simulation.phase === 'traveling' ? 'In motion' : simulation.phase === 'paused' ? 'Paused' : simulation.phase === 'arrived' ? 'Send again' : 'Send message';
+  const active = simulation.phase === 'reading' || simulation.phase === 'breaking' || simulation.phase === 'outbound' || simulation.phase === 'destination' || simulation.phase === 'returning';
+  const canSubmit = simulation.phase === 'idle' || simulation.phase === 'complete';
+  const buttonLabel = simulation.phase === 'reading' ? 'Reading' : simulation.phase === 'breaking' ? 'Breaking apart' : simulation.phase === 'outbound' || simulation.phase === 'returning' ? 'In motion' : simulation.phase === 'destination' ? 'At destination' : simulation.phase === 'paused' ? 'Paused' : simulation.phase === 'complete' ? 'Send again' : 'Send message';
   return (
     <section id="home" className="relative flex min-h-[760px] items-center overflow-hidden pt-24 sm:min-h-[850px]">
       <NetworkBackdrop />
@@ -249,9 +253,9 @@ function Hero({ message, setMessage, start, simulation, composerHint }: { messag
               </div>
             </div>
             <AnimatePresence>
-              {simulation.phase === 'arrived' && (
+              {simulation.phase === 'complete' && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} className="border-t border-cyan-300/20 bg-cyan-300/[0.06] px-5 py-3 font-mono-ui text-[10px] tracking-[0.06em] text-cyan-200">
-                  <Check size={13} className="mr-2 inline-block" /> FIRST HANDOFF COMPLETE · FOLLOW IT BELOW
+                  <Check size={13} className="mr-2 inline-block" /> OUTBOUND + RETURN COMPLETE · FOLLOW IT BELOW
                 </motion.div>
               )}
             </AnimatePresence>
@@ -270,11 +274,61 @@ function Hero({ message, setMessage, start, simulation, composerHint }: { messag
   );
 }
 
+const networkNodes = [
+  { id: 'visitor', label: 'Visitor device', short: 'device', x: 6, y: 51, purpose: 'The readable thought starts here, then gets prepared for a trip.' },
+  { id: 'wifi', label: 'Wi-Fi', short: 'wi-fi', x: 17, y: 51, purpose: 'Your nearby wireless link carries the first local hop.' },
+  { id: 'router', label: 'Router', short: 'router', x: 28, y: 51, purpose: 'A router decides which next connection is useful.' },
+  { id: 'isp', label: 'ISP', short: 'isp', x: 39, y: 51, purpose: 'Your internet provider connects the local network to the wider route.' },
+  { id: 'mesh-entry', label: 'Mesh entry', short: 'entry', x: 51, y: 51, purpose: 'The message enters a shared web of independently connected routes.' },
+  { id: 'mesh-north', label: 'Mesh north', short: 'north', x: 63, y: 26, purpose: 'One possible direction through the internet mesh.' },
+  { id: 'mesh-core', label: 'Mesh core', short: 'core', x: 75, y: 51, purpose: 'A central handoff carries the packets closer to their destination.' },
+  { id: 'mesh-south', label: 'Mesh south', short: 'south', x: 64, y: 76, purpose: 'A different connected path; a network can change direction.' },
+  { id: 'mesh-alt', label: 'Alternate route', short: 'alternate', x: 75, y: 15, purpose: 'A visible alternate route reminds us that the internet is not one straight line.' },
+  { id: 'destination', label: 'Destination server', short: 'server', x: 93, y: 51, purpose: 'The receiving service gathers the packets back into a message.' },
+];
+
+const networkEdges = [
+  { id: 'edge-device-wifi', from: 'visitor', to: 'wifi' },
+  { id: 'edge-wifi-router', from: 'wifi', to: 'router' },
+  { id: 'edge-router-isp', from: 'router', to: 'isp' },
+  { id: 'edge-isp-entry', from: 'isp', to: 'mesh-entry' },
+  { id: 'edge-entry-north', from: 'mesh-entry', to: 'mesh-north' },
+  { id: 'edge-north-core', from: 'mesh-north', to: 'mesh-core' },
+  { id: 'edge-core-destination', from: 'mesh-core', to: 'destination' },
+  { id: 'edge-destination-core-return', from: 'destination', to: 'mesh-core' },
+  { id: 'edge-core-south-return', from: 'mesh-core', to: 'mesh-south' },
+  { id: 'edge-south-entry-return', from: 'mesh-south', to: 'mesh-entry' },
+  { id: 'edge-entry-isp-return', from: 'mesh-entry', to: 'isp' },
+  { id: 'edge-isp-router-return', from: 'isp', to: 'router' },
+  { id: 'edge-router-wifi-return', from: 'router', to: 'wifi' },
+  { id: 'edge-wifi-device-return', from: 'wifi', to: 'visitor' },
+  { id: 'edge-entry-alt', from: 'mesh-entry', to: 'mesh-alt', alternate: true },
+  { id: 'edge-alt-core', from: 'mesh-alt', to: 'mesh-core', alternate: true },
+];
+
+const journeySequence = [
+  { nodeId: 'visitor', edgeId: undefined, direction: 'OUTBOUND' as const },
+  { nodeId: 'wifi', edgeId: 'edge-device-wifi', direction: 'OUTBOUND' as const },
+  { nodeId: 'router', edgeId: 'edge-wifi-router', direction: 'OUTBOUND' as const },
+  { nodeId: 'isp', edgeId: 'edge-router-isp', direction: 'OUTBOUND' as const },
+  { nodeId: 'mesh-entry', edgeId: 'edge-isp-entry', direction: 'OUTBOUND' as const },
+  { nodeId: 'mesh-north', edgeId: 'edge-entry-north', direction: 'OUTBOUND' as const },
+  { nodeId: 'mesh-core', edgeId: 'edge-north-core', direction: 'OUTBOUND' as const },
+  { nodeId: 'destination', edgeId: 'edge-core-destination', direction: 'OUTBOUND' as const },
+  { nodeId: 'mesh-core', edgeId: 'edge-destination-core-return', direction: 'RETURN' as const },
+  { nodeId: 'mesh-south', edgeId: 'edge-core-south-return', direction: 'RETURN' as const },
+  { nodeId: 'mesh-entry', edgeId: 'edge-south-entry-return', direction: 'RETURN' as const },
+  { nodeId: 'isp', edgeId: 'edge-entry-isp-return', direction: 'RETURN' as const },
+  { nodeId: 'router', edgeId: 'edge-isp-router-return', direction: 'RETURN' as const },
+  { nodeId: 'wifi', edgeId: 'edge-router-wifi-return', direction: 'RETURN' as const },
+  { nodeId: 'visitor', edgeId: 'edge-wifi-device-return', direction: 'RETURN' as const },
+];
+
 function SimulationControls({ simulation, start, pause, continueSimulation, reset }: { simulation: SimulationState; start: () => void; pause: () => void; continueSimulation: () => void; reset: () => void }) {
-  const canPause = simulation.phase === 'reading' || simulation.phase === 'breaking' || simulation.phase === 'traveling';
+  const canPause = simulation.phase === 'reading' || simulation.phase === 'breaking' || simulation.phase === 'outbound' || simulation.phase === 'destination' || simulation.phase === 'returning';
   return (
     <div className="mt-6 flex flex-wrap items-center gap-2" data-testid="simulation-controls">
-      {simulation.phase === 'idle' && <button onClick={start} className="rounded-full bg-cyan-300 px-4 py-2.5 font-mono-ui text-[10px] uppercase tracking-[0.12em] text-[#081019] transition-colors hover:bg-cyan-200" data-testid="button-simulation-start"><Send size={12} className="mr-2 inline-block" /> Start</button>}
+      {(simulation.phase === 'idle' || simulation.phase === 'complete') && <button onClick={start} className="rounded-full bg-cyan-300 px-4 py-2.5 font-mono-ui text-[10px] uppercase tracking-[0.12em] text-[#081019] transition-colors hover:bg-cyan-200" data-testid="button-simulation-start"><Send size={12} className="mr-2 inline-block" /> {simulation.phase === 'complete' ? 'Start again' : 'Start'}</button>}
       {canPause && <button onClick={pause} className="rounded-full border border-slate-600 px-4 py-2.5 font-mono-ui text-[10px] uppercase tracking-[0.12em] text-slate-300 transition-colors hover:border-pink-300/60 hover:text-pink-200" data-testid="button-simulation-pause">Pause</button>}
       {simulation.phase === 'paused' && <button onClick={continueSimulation} className="rounded-full bg-cyan-300 px-4 py-2.5 font-mono-ui text-[10px] uppercase tracking-[0.12em] text-[#081019] transition-colors hover:bg-cyan-200" data-testid="button-simulation-continue"><ArrowRight size={12} className="mr-2 inline-block" /> Continue</button>}
       {simulation.phase !== 'idle' && <button onClick={reset} className="rounded-full border border-slate-700 px-4 py-2.5 font-mono-ui text-[10px] uppercase tracking-[0.12em] text-slate-500 transition-colors hover:border-slate-500 hover:text-slate-200" data-testid="button-simulation-reset">Reset</button>}
@@ -282,7 +336,7 @@ function SimulationControls({ simulation, start, pause, continueSimulation, rese
   );
 }
 
-function PacketRoute({ message, simulation, start, pause, continueSimulation, reset }: { message: string; simulation: SimulationState; start: () => void; pause: () => void; continueSimulation: () => void; reset: () => void }) {
+function NetworkJourney({ message, simulation, start, pause, continueSimulation, reset }: { message: string; simulation: SimulationState; start: () => void; pause: () => void; continueSimulation: () => void; reset: () => void }) {
   const packetLabels = useMemo(() => {
     const clean = message.trim();
     if (!clean) return [];
@@ -290,35 +344,85 @@ function PacketRoute({ message, simulation, start, pause, continueSimulation, re
     const size = Math.ceil(clean.length / count);
     return Array.from({ length: count }, (_, index) => clean.slice(index * size, (index + 1) * size) || `chunk ${index + 1}`);
   }, [message]);
-  const isPaused = simulation.phase === 'paused';
-  const showPackets = simulation.phase === 'breaking' || simulation.phase === 'traveling' || simulation.phase === 'arrived' || isPaused;
-  const packetProgress = simulation.phase === 'arrived' ? 1 : simulation.progress;
-  const packetOffsets = [[0, -24], [7, 18], [-6, 42], [11, -43], [-11, 0], [4, 61]];
   const routeProgress = phaseProgress(simulation);
+  const effectivePhase = simulation.phase === 'paused' ? simulation.pausedFrom : simulation.phase;
+  const routeIndex = effectivePhase === 'complete' ? journeySequence.length - 1
+    : effectivePhase === 'destination' ? 7
+      : effectivePhase === 'outbound' ? Math.min(6, Math.floor(simulation.progress * 7))
+        : effectivePhase === 'returning' ? 7 + Math.min(6, Math.floor(simulation.progress * 7))
+          : -1;
+  const activeStep = routeIndex >= 0 ? journeySequence[routeIndex] : undefined;
+  const activeEdgeId = routeIndex >= 0 && routeIndex < journeySequence.length - 1 ? journeySequence[routeIndex + 1].edgeId : undefined;
+  const activeEdge = networkEdges.find((edge) => edge.id === activeEdgeId);
+  const fromNode = networkNodes.find((node) => node.id === activeEdge?.from);
+  const toNode = networkNodes.find((node) => node.id === activeEdge?.to);
+  const edgeProgress = effectivePhase === 'outbound' || effectivePhase === 'returning' ? (simulation.progress * 7) % 1 : 0;
+  const [selectedNodeId, setSelectedNodeId] = useState('visitor');
+  const selectedNode = networkNodes.find((node) => node.id === selectedNodeId) || networkNodes[0];
+  const completedEdges = new Set(journeySequence.slice(1, routeIndex + 1).map((step) => step.edgeId));
+  const completedNodeIds = new Set(journeySequence.slice(0, routeIndex + 1).map((step) => step.nodeId));
+  const directionLabel = effectivePhase === 'returning' || effectivePhase === 'complete' ? 'RETURN' : effectivePhase === 'outbound' || effectivePhase === 'destination' ? 'OUTBOUND' : 'PREPARE';
+  const phaseCopy = simulation.phase === 'reading' ? 'Holding the original thought intact'
+    : simulation.phase === 'breaking' ? 'Breaking one thought into small packets'
+      : simulation.phase === 'outbound' ? 'Packets taking the outbound route'
+        : simulation.phase === 'destination' ? 'Destination server received the packets'
+          : simulation.phase === 'returning' ? 'Return journey moving back to the visitor'
+            : simulation.phase === 'paused' ? 'Paused exactly here'
+              : simulation.phase === 'complete' ? 'Return journey complete' : 'Ready when you are';
   return (
-    <div className="relative min-h-[410px] overflow-hidden rounded-2xl border border-slate-700/70 bg-[#0b1220] p-5 sm:p-8" data-testid="panel-packet-route">
+    <div className="relative overflow-hidden rounded-2xl border border-slate-700/70 bg-[#0b1220] p-5 sm:p-8" data-testid="panel-network-journey">
       <div className="network-grid absolute inset-0 opacity-40" />
       <div className="relative flex items-start justify-between gap-4">
-        <div><div className="font-mono-ui text-[10px] uppercase tracking-[0.15em] text-cyan-300">Live route / local only</div><div className="mt-2 font-display text-2xl text-slate-100">From thought to packets</div></div>
+        <div><div className="font-mono-ui text-[10px] uppercase tracking-[0.15em] text-cyan-300">Conceptual route / local only</div><div className="mt-2 font-display text-2xl text-slate-100">A network, not a straight line</div></div>
         <div className="rounded-full border border-slate-700 bg-slate-900/50 px-3 py-2 font-mono-ui text-[10px] text-slate-500" data-testid="text-simulation-progress">{Math.round(routeProgress).toString().padStart(3, '0')}%</div>
       </div>
-      <div className="relative mt-9 h-[180px] sm:h-[205px]" data-testid="visual-packet-transformation">
-        <div className={`absolute left-0 top-[54px] z-10 w-[43%] min-w-[112px] rounded-xl border p-3 transition-colors sm:top-[60px] sm:min-w-[168px] sm:p-4 ${simulation.phase === 'reading' ? 'border-cyan-300/70 bg-cyan-300/[0.1]' : 'border-slate-700 bg-slate-900/75'}`} data-testid="visual-readable-message">
+      <div className="relative mt-4 flex items-center gap-2 rounded-lg border border-pink-300/15 bg-pink-300/[0.035] px-3 py-2.5 font-mono-ui text-[9px] leading-4 tracking-[0.04em] text-pink-100/70" data-testid="text-conceptual-disclaimer"><LockKeyhole size={12} className="shrink-0 text-pink-200" /> This is a local conceptual simulation — never the visitor&apos;s real internet route.</div>
+      <div className="relative mt-7 grid items-center gap-3 border-b border-slate-700/60 pb-6 sm:grid-cols-[1fr_auto_1fr]" data-testid="visual-packet-transformation">
+        <div className={`rounded-xl border p-3 transition-colors sm:p-4 ${simulation.phase === 'reading' ? 'border-cyan-300/70 bg-cyan-300/[0.1]' : 'border-slate-700 bg-slate-900/75'}`} data-testid="visual-readable-message">
           <div className="mb-2 flex items-center gap-2 font-mono-ui text-[9px] uppercase tracking-[0.12em] text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-pink-300" /> readable message</div>
-          <p className={`line-clamp-3 font-display text-xs leading-5 transition-opacity sm:text-sm ${simulation.phase === 'traveling' || simulation.phase === 'arrived' ? 'text-slate-500 opacity-60' : 'text-slate-200'}`}>{message || 'Your message will appear here.'}</p>
+          <p className={`line-clamp-2 font-display text-xs leading-5 transition-opacity sm:text-sm ${simulation.phase === 'outbound' || simulation.phase === 'returning' || simulation.phase === 'complete' ? 'text-slate-500 opacity-60' : 'text-slate-200'}`}>{message}</p>
         </div>
-        <div className="absolute left-[45%] right-[19%] top-[82px] h-px bg-gradient-to-r from-slate-700 via-cyan-300/35 to-cyan-300/60 sm:left-[44%] sm:right-[20%]" />
-        <div className="absolute right-0 top-[39px] z-10 flex w-[20%] min-w-[68px] flex-col items-center gap-2 sm:top-[45px] sm:min-w-[92px]" data-testid="visual-first-network-stage">
-          <div className={`flex h-14 w-14 items-center justify-center rounded-full border transition-all sm:h-[68px] sm:w-[68px] ${simulation.phase === 'arrived' ? 'border-cyan-200 bg-cyan-300 text-[#081019] shadow-[0_0_30px_hsl(186_92%_58%_/_0.26)]' : 'border-slate-600 bg-slate-900 text-slate-500'}`}><Radio size={19} /></div>
-          <span className="text-center font-mono-ui text-[9px] uppercase leading-4 tracking-[0.08em] text-slate-500">local<br />network</span>
+        <ArrowRight className="hidden text-slate-600 sm:block" size={17} />
+        <div className="flex min-h-12 flex-wrap items-center gap-1.5 rounded-xl border border-dashed border-cyan-300/25 bg-cyan-300/[0.035] p-3 sm:p-4" data-testid="visual-packet-bundle">
+          {packetLabels.map((label, index) => <motion.span key={`${label}-${index}`} initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: simulation.phase === 'reading' ? 0.35 : 1, scale: 1 }} transition={{ delay: index * 0.07 }} className="flex items-center gap-1 rounded-full border border-cyan-300/40 bg-cyan-300/10 px-2 py-1 font-mono-ui text-[8px] text-cyan-100" data-testid={`visual-packet-chip-${index + 1}`}><span className="h-1 w-1 rounded-full bg-cyan-300" />{label.slice(0, 10)}</motion.span>)}
+          <span className="ml-auto font-mono-ui text-[8px] uppercase tracking-[0.08em] text-slate-600">packet bundle</span>
         </div>
-        {showPackets && packetLabels.map((label, index) => {
-          const [x, y] = packetOffsets[index % packetOffsets.length];
-          return <motion.div key={`${label}-${index}`} className="absolute left-[41%] top-[75px] z-20 flex items-center gap-1.5 rounded-full border border-cyan-200/60 bg-[#0d1d2c] px-2 py-1 font-mono-ui text-[8px] text-cyan-100 shadow-[0_0_16px_hsl(186_92%_58%_/_0.2)] sm:px-2.5 sm:text-[9px]" initial={{ opacity: 0, scale: 0.4, x: 0, y: 0 }} animate={{ opacity: 1, scale: simulation.phase === 'breaking' ? [0.8, 1.06, 0.96] : 1, x: packetProgress * (index % 2 === 0 ? 190 + x : 165 + x), y: packetProgress * y }} transition={{ delay: index * 0.08, duration: simulation.phase === 'breaking' ? 0.5 : 0.8 }} data-testid={`visual-packet-${index + 1}`}><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300" />{label.slice(0, 14)}</motion.div>;
+      </div>
+      <div className="relative mt-5 h-[295px] sm:h-[350px]" data-testid="visual-network-graph">
+        <div className="pointer-events-none absolute left-[47%] top-[7%] h-[84%] w-[35%] rounded-2xl border border-dashed border-violet-300/20 bg-violet-300/[0.025]" />
+        <span className="pointer-events-none absolute left-[49%] top-[9%] font-mono-ui text-[8px] uppercase tracking-[0.1em] text-violet-200/60">internet mesh</span>
+        <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          {networkEdges.map((edge) => {
+            const from = networkNodes.find((node) => node.id === edge.from) || networkNodes[0];
+            const to = networkNodes.find((node) => node.id === edge.to) || networkNodes[0];
+            const isActive = activeEdgeId === edge.id;
+            const isComplete = completedEdges.has(edge.id);
+            return <line key={edge.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke={isActive ? (directionLabel === 'RETURN' ? 'hsl(320 78% 65%)' : 'hsl(186 92% 58%)') : isComplete ? 'hsl(186 92% 58% / .58)' : edge.alternate ? 'hsl(272 70% 72% / .32)' : 'hsl(217 22% 38% / .55)'} strokeWidth={isActive ? 0.7 : isComplete ? 0.42 : 0.24} strokeDasharray={edge.alternate ? '1.4 1.2' : undefined} data-testid={`network-edge-${edge.id}`} />;
+          })}
+          {fromNode && toNode && activeEdge && (effectivePhase === 'outbound' || effectivePhase === 'returning') && packetLabels.slice(0, 3).map((label, index) => <motion.g key={`moving-${label}-${index}`} initial={{ x: fromNode.x, y: fromNode.y }} animate={{ x: fromNode.x + (toNode.x - fromNode.x) * edgeProgress, y: fromNode.y + (toNode.y - fromNode.y) * edgeProgress }} transition={{ duration: 0.22, ease: 'linear', delay: index * 0.08 }} data-testid={`visual-moving-packet-${index + 1}`}><rect x="-1.15" y="-0.7" width="2.3" height="1.4" rx=".25" fill={directionLabel === 'RETURN' ? 'hsl(320 78% 65%)' : 'hsl(186 92% 58%)'} /><circle r=".35" fill="hsl(210 33% 96%)" /></motion.g>)}
+        </svg>
+        {networkNodes.map((node) => {
+          const isActive = activeStep?.nodeId === node.id && simulation.phase !== 'complete';
+          const isComplete = completedNodeIds.has(node.id) && !isActive;
+          return <button key={node.id} type="button" onClick={() => setSelectedNodeId(node.id)} className={`group absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1.5 outline-none ${isActive ? 'z-20' : 'z-10'}`} style={{ left: `${node.x}%`, top: `${node.y}%` }} aria-label={`Show purpose of ${node.label}`} data-testid={`button-network-node-${node.id}`}>
+            <span className={`flex h-7 w-7 items-center justify-center rounded-full border transition-all sm:h-9 sm:w-9 ${isActive ? 'border-cyan-100 bg-cyan-300 text-[#081019] shadow-[0_0_22px_hsl(186_92%_58%_/_0.55)]' : isComplete ? 'border-cyan-300/70 bg-cyan-300/15 text-cyan-100' : 'border-slate-600 bg-[#0b1220] text-slate-500 group-hover:border-slate-300 group-hover:text-slate-200'}`}><span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-[#081019]' : isComplete ? 'bg-cyan-300' : 'bg-slate-600'}`} /></span>
+            <span className={`whitespace-nowrap font-mono-ui text-[8px] uppercase tracking-[0.04em] sm:text-[9px] ${isActive ? 'text-cyan-100' : isComplete ? 'text-cyan-300/80' : 'text-slate-600 group-hover:text-slate-300'}`}>{node.short}</span>
+          </button>;
         })}
       </div>
-      <div className="relative border-t border-slate-700/60 pt-4">
-        <div className="mb-3 flex items-center justify-between font-mono-ui text-[9px] uppercase tracking-[0.12em] text-slate-600"><span data-testid="text-simulation-phase">{simulation.phase === 'idle' ? 'Ready when you are' : simulation.phase === 'reading' ? 'Holding the thought intact' : simulation.phase === 'breaking' ? 'Breaking one thought into small packets' : simulation.phase === 'traveling' ? 'Packets moving toward the first handoff' : simulation.phase === 'paused' ? 'Paused exactly here' : 'Packets reached the first handoff'}</span><span>{packetLabels.length || 0} packets</span></div>
+      <div className="relative grid gap-4 border-t border-slate-700/60 pt-4 sm:grid-cols-[1fr_auto] sm:items-start">
+        <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 p-4" data-testid="network-node-explanation">
+          <div className="flex flex-wrap items-center gap-2 font-mono-ui text-[9px] uppercase tracking-[0.12em] text-cyan-300"><Info size={12} /> {selectedNode.label} <span className="text-slate-700">/</span> {activeStep ? `active: ${networkNodes.find((node) => node.id === activeStep.nodeId)?.short}` : 'stage guide'}</div>
+          <p className="mt-2 text-xs leading-5 text-slate-400" data-testid="text-active-stage-explanation">{selectedNode.purpose}</p>
+        </div>
+        <div className="flex items-center justify-start gap-2 sm:justify-end" aria-label="Journey direction">
+          <span className={`rounded-full border px-2.5 py-1.5 font-mono-ui text-[9px] tracking-[0.12em] ${directionLabel === 'OUTBOUND' ? 'border-cyan-300/50 bg-cyan-300/10 text-cyan-200' : 'border-slate-700 text-slate-600'}`} data-testid="label-direction-outbound">OUTBOUND</span>
+          <ArrowRight size={13} className="text-slate-700" />
+          <span className={`rounded-full border px-2.5 py-1.5 font-mono-ui text-[9px] tracking-[0.12em] ${directionLabel === 'RETURN' ? 'border-pink-300/50 bg-pink-300/10 text-pink-200' : 'border-slate-700 text-slate-600'}`} data-testid="label-direction-return">RETURN</span>
+        </div>
+      </div>
+      <div className="relative mt-4">
+        <div className="mb-3 flex items-center justify-between font-mono-ui text-[9px] uppercase tracking-[0.12em] text-slate-600"><span data-testid="text-simulation-phase">{phaseCopy}</span><span>{packetLabels.length} packets · {directionLabel}</span></div>
         <div className="h-1 overflow-hidden rounded-full bg-slate-800" aria-label={`Simulation progress ${Math.round(routeProgress)} percent`}><motion.div className="h-full origin-left rounded-full bg-gradient-to-r from-pink-300 via-cyan-300 to-cyan-200" animate={{ scaleX: routeProgress / 100 }} transition={{ duration: 0.35 }} /></div>
         <SimulationControls simulation={simulation} start={start} pause={pause} continueSimulation={continueSimulation} reset={reset} />
       </div>
@@ -327,7 +431,7 @@ function PacketRoute({ message, simulation, start, pause, continueSimulation, re
 }
 
 function Journey({ message, simulation, start, pause, continueSimulation, reset }: { message: string; simulation: SimulationState; start: () => void; pause: () => void; continueSimulation: () => void; reset: () => void }) {
-  const currentStage = simulation.phase === 'arrived' ? 1 : 0;
+  const currentStage = simulation.phase === 'destination' || simulation.phase === 'returning' || simulation.phase === 'complete' ? 1 : 0;
   const sent = simulation.phase !== 'idle';
   return (
     <SectionReveal id="journey" className="relative mx-auto max-w-7xl scroll-mt-20 px-5 py-28 sm:px-8 sm:py-36">
@@ -379,7 +483,7 @@ function Journey({ message, simulation, start, pause, continueSimulation, reset 
                 <p className="relative mt-2 max-w-xs text-sm leading-6 text-slate-600">Send a message above to wake up the network and watch the handoffs happen.</p>
                 <button onClick={() => scrollToSection('home')} className="relative mt-6 flex items-center gap-2 font-mono-ui text-[10px] uppercase tracking-[0.15em] text-cyan-300 hover:text-cyan-200" data-testid="button-return-to-compose">Return to compose <ArrowRight size={13} /></button>
               </motion.div>
-            ) : <motion.div key="active" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><PacketRoute message={message} simulation={simulation} start={start} pause={pause} continueSimulation={continueSimulation} reset={reset} /></motion.div>}
+            ) : <motion.div key="active" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><NetworkJourney message={message} simulation={simulation} start={start} pause={pause} continueSimulation={continueSimulation} reset={reset} /></motion.div>}
           </AnimatePresence>
         </div>
       </div>
@@ -479,14 +583,19 @@ function Home() {
       return () => window.clearTimeout(timeout);
     }
     if (simulation.phase === 'breaking') {
-      const timeout = window.setTimeout(() => setSimulation((current) => current.phase === 'breaking' ? { ...current, phase: 'traveling', progress: 0 } : current), 1050);
+      const timeout = window.setTimeout(() => setSimulation((current) => current.phase === 'breaking' ? { ...current, phase: 'outbound', progress: 0 } : current), 1050);
       return () => window.clearTimeout(timeout);
     }
-    if (simulation.phase === 'traveling') {
+    if (simulation.phase === 'destination') {
+      const timeout = window.setTimeout(() => setSimulation((current) => current.phase === 'destination' ? { ...current, phase: 'returning', progress: 0 } : current), 1100);
+      return () => window.clearTimeout(timeout);
+    }
+    if (simulation.phase === 'outbound' || simulation.phase === 'returning') {
       const interval = window.setInterval(() => setSimulation((current) => {
-        if (current.phase !== 'traveling') return current;
+        if (current.phase !== 'outbound' && current.phase !== 'returning') return current;
         const nextProgress = Math.min(1, current.progress + 0.025);
-        return nextProgress >= 1 ? { ...current, phase: 'arrived', progress: 1, pausedFrom: 'arrived' } : { ...current, progress: nextProgress };
+        if (nextProgress < 1) return { ...current, progress: nextProgress };
+        return current.phase === 'outbound' ? { ...current, phase: 'destination', progress: 1, pausedFrom: 'destination' } : { ...current, phase: 'complete', progress: 1, pausedFrom: 'complete' };
       }), 70);
       return () => window.clearInterval(interval);
     }
@@ -509,7 +618,7 @@ function Home() {
     scrollToSection('journey');
   };
   const pause = () => setSimulation((current) => {
-    if (current.phase !== 'reading' && current.phase !== 'breaking' && current.phase !== 'traveling') return current;
+    if (current.phase !== 'reading' && current.phase !== 'breaking' && current.phase !== 'outbound' && current.phase !== 'destination' && current.phase !== 'returning') return current;
     return { ...current, phase: 'paused', pausedFrom: current.phase };
   });
   const continueSimulation = () => setSimulation((current) => current.phase === 'paused' ? { ...current, phase: current.pausedFrom } : current);
